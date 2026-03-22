@@ -9,6 +9,7 @@
   "dependencies": {
     "playwright": "latest",
     "playwright-extra": "latest",
-    "puppeteer-extra-plugin-stealth": "latest"
+    "puppeteer-extra-plugin-stealth": "latest",
+    "express": "latest"
   }
 }

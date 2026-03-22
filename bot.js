@@ -184,4 +184,17 @@ async function main() {
     }
 }
 
+// --- Web Server (for HF Spaces) ---
+const express = require("express");
+const app = express();
+const PORT = process.env.PORT || 7860;
+
+app.get("/", (req, res) => {
+  res.send("YouTube Watch Time Bot is Running! 🚀");
+});
+
+app.listen(PORT, () => {
+  log(`🌍 Web server started on port ${PORT}`);
+});
+
 main();
