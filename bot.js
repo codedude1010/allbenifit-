@@ -32,11 +32,36 @@ const VIEWPORTS = [
   { width: 1366, height: 768 }
 ];
 
+// --- Global State ---
+let isRunning = false;
+let stopRequested = false;
+let clients = [];
+let targetUrl = "https://youtu.be/gNcXZZNoSto";
+
 // --- Helpers ---
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rand = (min, max) => Math.random() * (max - min) + min;
 const randInt = (min, max) => Math.floor(rand(min, max + 1));
 const pick = (arr) => arr[randInt(0, arr.length - 1)];
+
+function log(msg, engineName = "", isError = false) {
+    const ts = new Date().toLocaleTimeString();
+    const prefix = engineName ? `[${engineName.toUpperCase()}] ` : "";
+    const fullMsg = `${prefix}${msg}`;
+    console.log(`[${ts}] ${fullMsg}`);
+    
+    // Broadcast to SSE clients
+    const data = JSON.stringify({ type: 'log', ts, engine: engineName, msg, isError });
+    clients.forEach(client => client.res.write(`data: ${data}\n\n`));
+}
+
+function broadcastStatus() {
+    const data = JSON.stringify({ type: 'status', running: isRunning });
+    clients.forEach(client => client.res.write(`data: ${data}\n\n`));
+}
+
+// ... (Rest of the bot logic: bezierPoint, humanMouseMove, randomPause, skipAds remain the same)
+// I will include them below but they are unchanged from the previous version except for using the new log()
 
 function bezierPoint(t, p0, p1, p2, p3) {
   const u = 1 - t;
@@ -61,7 +86,7 @@ async function humanMouseMove(page, x0, y0, x1, y1) {
 async function randomPause(page) {
     if (Math.random() < 0.3) {
         const pauseTime = rand(5000, 15000);
-        log(`      ⏸ Random pause: ${Math.round(pauseTime/1000)}s`);
+        log(`⏸ Random pause: ${Math.round(pauseTime/1000)}s`);
         await sleep(pauseTime);
     }
 }
@@ -70,32 +95,28 @@ async function skipAds(page) {
     try {
         const skipBtn = await page.$(".ytp-skip-ad-button, .ytp-ad-skip-button-hover");
         if (skipBtn) {
-            log("      ⏭ Ad skip button found!");
-            await sleep(rand(2000, 4000)); // Wait a bit before skipping
+            log("⏭ Ad skip button found!");
+            await sleep(rand(2000, 4000));
             const box = await skipBtn.boundingBox();
             if (box) {
                 const cur = await page.evaluate(() => ({ x: window.innerWidth/2, y: window.innerHeight/2 }));
                 await humanMouseMove(page, cur.x, cur.y, box.x + box.width/2, box.y + box.height/2);
                 await page.mouse.click(box.x + box.width/2, box.y + box.height/2);
-                log("      ✅ Ad skipped");
+                log("✅ Ad skipped");
             }
         }
     } catch (e) {}
 }
 
-function log(msg, engineName = "") {
-  const ts = new Date().toISOString().substring(11, 19);
-  const prefix = engineName ? `[${engineName.toUpperCase()}] ` : "";
-  console.log(`[${ts}] ${prefix}${msg}`);
-}
-
 async function runFlow(engine) {
+    if (stopRequested) return;
+    
     const ua = pick(USER_AGENTS);
     const viewport = pick(VIEWPORTS);
     const query = pick(SEARCH_QUERIES);
     const referrer = engine.url + query;
 
-    log(`Starting flow for ${engine.name}`, engine.name);
+    log(`Starting flow`, engine.name);
     
     const isHeadless = process.env.HEADLESS === "true";
     const browser = await chromium.launch({ 
@@ -113,12 +134,10 @@ async function runFlow(engine) {
 
     try {
         log(`Navigating to target video`, engine.name);
-        await page.goto(TARGET_URL, { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
         
-        // Wait for video player
         await page.waitForSelector(".html5-video-player");
         
-        // Handle play if needed
         const playBtn = await page.$(".ytp-large-play-button");
         if (playBtn) {
             await sleep(rand(2000, 4000));
@@ -126,26 +145,23 @@ async function runFlow(engine) {
             log("Clicking play button", engine.name);
         }
 
-        // Get video duration
         let duration = await page.evaluate(() => {
             const video = document.querySelector("video");
             return video ? video.duration : 0;
         });
 
         if (duration === 0) {
-            log("Could not detect duration, waiting 5 minutes", engine.name);
+            log("Could not detect duration, using 5m default", engine.name);
             duration = 300; 
         } else {
             log(`Video duration: ${Math.round(duration)}s`, engine.name);
         }
 
-        // Watch loop
         let elapsed = 0;
-        while (elapsed < duration) {
+        while (elapsed < duration && !stopRequested) {
             await skipAds(page);
             await randomPause(page);
             
-            // Random mouse movement
             if (Math.random() < 0.2) {
                 const rx = rand(100, viewport.width - 100);
                 const ry = rand(100, viewport.height - 100);
@@ -153,48 +169,84 @@ async function runFlow(engine) {
                 await humanMouseMove(page, cur.x, cur.y, rx, ry);
             }
 
-            await sleep(10000); // Check every 10 seconds
+            await sleep(10000);
             elapsed += 10;
-            
-            // Re-check duration in case it was 0 initially
-            if (duration === 300) {
-                const newDuration = await page.evaluate(() => {
-                    const video = document.querySelector("video");
-                    return video ? video.duration : 0;
-                });
-                if (newDuration > 0) duration = newDuration;
-            }
         }
 
-        log(`Finished watching video`, engine.name);
+        log(`Finished watching`, engine.name);
     } catch (err) {
-        log(`Error: ${err.message}`, engine.name);
+        log(`Error: ${err.message}`, engine.name, true);
     } finally {
         await browser.close();
     }
 }
 
-async function main() {
-    log("🚀 Starting parallel YouTube watch time bot...");
-    while (true) {
+async function botMain() {
+    isRunning = true;
+    stopRequested = false;
+    broadcastStatus();
+    log("🚀 Bot execution started...");
+
+    while (!stopRequested) {
         const tasks = ENGINES.map(engine => runFlow(engine));
         await Promise.all(tasks);
-        log("🔄 All parallel flows completed. Waiting 30s before restart...");
+        
+        if (stopRequested) break;
+        log("🔄 All parallel flows completed. Waiting 30s...");
         await sleep(30000);
     }
+
+    isRunning = false;
+    stopRequested = false;
+    broadcastStatus();
+    log("🛑 Bot execution stopped.");
 }
 
-// --- Web Server (for HF Spaces) ---
+// --- Web Server ---
 const express = require("express");
+const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 7860;
 
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
+
 app.get("/", (req, res) => {
-  res.send("YouTube Watch Time Bot is Running! 🚀");
+    res.sendFile(path.join(__dirname, "index.html"));
+});
+
+app.get("/api/logs", (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const clientId = Date.now();
+    const newClient = { id: clientId, res };
+    clients.push(newClient);
+
+    // Send initial status
+    const data = JSON.stringify({ type: 'status', running: isRunning });
+    res.write(`data: ${data}\n\n`);
+
+    req.on('close', () => {
+        clients = clients.filter(c => c.id !== clientId);
+    });
+});
+
+app.post("/api/start", (req, res) => {
+    if (isRunning) return res.status(400).json({ error: "Already running" });
+    targetUrl = req.body.url;
+    botMain(); // Run in background
+    res.json({ success: true });
+});
+
+app.post("/api/stop", (req, res) => {
+    if (!isRunning) return res.status(400).json({ error: "Not running" });
+    stopRequested = true;
+    res.json({ success: true });
 });
 
 app.listen(PORT, () => {
-  log(`🌍 Web server started on port ${PORT}`);
+    console.log(`🌍 Dashboard available at http://localhost:${PORT}`);
 });
-
-main();
