@@ -1,0 +1,14 @@
+{
+  "name": "all-benifits-bot",
+  "version": "1.0.0",
+  "description": "YouTube Watch Time Bot with Parallel Search Engines",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "playwright": "latest",
+    "playwright-extra": "latest",
+    "puppeteer-extra-plugin-stealth": "latest"
+  }
+}

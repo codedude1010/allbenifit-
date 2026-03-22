@@ -1,0 +1,35 @@
+name: YouTube Watch Time Bot
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 3 * * *' # Every night at 3 AM UTC
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Install Playwright Browsers
+      run: npx playwright install chromium
+
+    - name: Run Bot
+      env:
+        HEADLESS: 'true'
+      run: |
+        # Set a timeout for the bot to avoid hanging too long in Actions
+        # Since the bot has while(true), we run it only for a limited time in Actions
+        timeout 5h node bot.js || true
