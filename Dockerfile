@@ -14,7 +14,8 @@ COPY package*.json ./
 RUN npm install
 
 # Install Playwright browsers and their system dependencies
-RUN npx playwright install chromium --with-deps
+# Also install xvfb to provide a virtual display
+RUN apt-get update && apt-get install -y xvfb && npx playwright install chromium --with-deps
 
 # Copy source code
 COPY . .
@@ -22,5 +23,5 @@ COPY . .
 # Expose port
 EXPOSE 7860
 
-# Run the bot
-CMD ["node", "bot.js"]
+# Run the bot with xvfb-run
+CMD ["xvfb-run", "--server-args=-screen 0 1280x1024x24", "node", "bot.js"]

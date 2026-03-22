@@ -118,10 +118,19 @@ async function runFlow(engine) {
 
     log(`Starting flow`, engine.name);
     
-    const isHeadless = process.env.HEADLESS === "true";
+    const isHeadless = process.env.HEADLESS !== "false"; // Default to true if not "false"
+    log(`Headless mode: ${isHeadless}`, engine.name);
+    
     const browser = await chromium.launch({ 
         headless: isHeadless, 
-        args: ["--disable-blink-features=AutomationControlled"] 
+        args: [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-accelerated-2d-canvas",
+            "--disable-gpu"
+        ] 
     });
     
     const context = await browser.newContext({
